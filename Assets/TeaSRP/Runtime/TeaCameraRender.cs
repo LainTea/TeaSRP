@@ -14,31 +14,40 @@ public partial class TeaCameraRender
 
     CullingResults cullingResults;
 
-    static ShaderTagId unlitShaderTagId = new ShaderTagId("SRPDefaultUnlit");
+    static ShaderTagId unlitShaderTagId = new ShaderTagId("SRPDefaultUnlit"),
+                         litShaderTagId = new ShaderTagId("TeaLit");
 
-    public void Render(ScriptableRenderContext context,Camera camera, bool useDynamicBatching, bool useGPUInstancing)
+    TeaLighting lighting = new TeaLighting();
+
+    public void Render(ScriptableRenderContext context,Camera camera, bool useDynamicBatching, bool useGPUInstancing,TeaShadowSettings shadowSettings)
     {
         this.context = context;
         this.camera = camera;
 
         PrepareBuffer();
         PrepareForSceneWindow();
-        if (!Cull())
+        if (!Cull(shadowSettings.maxDistance))
         {
             return;
         }
 
+        buffer.BeginSample(SampleName);
+        ExcuteBuffer();
+        lighting.Setup(context, cullingResults, shadowSettings);
+        buffer.EndSample(SampleName);
         Setup();
         DrawVisibleGeometry(useDynamicBatching, useGPUInstancing);
         DrawUnsupportedShaders();
         DrawGizmos();
+        lighting.Cleanup();
         Submit();
     }
 
-    bool Cull()
+    bool Cull(float maxShadowDistance)
     {
         if(camera.TryGetCullingParameters(out ScriptableCullingParameters p))
         {
+            p.shadowDistance = Mathf.Min(maxShadowDistance, camera.farClipPlane);
             cullingResults = context.Cull(ref p);
             return true;
         }
@@ -80,6 +89,8 @@ public partial class TeaCameraRender
             enableDynamicBatching = useDynamicBatching,
             enableInstancing = useGPUInstancing
         };
+        drawingSettings.SetShaderPassName(1, litShaderTagId);
+
         var filterSettings = new FilteringSettings(RenderQueueRange.opaque);
 
         context.DrawRenderers(cullingResults, ref drawingSettings, ref filterSettings);

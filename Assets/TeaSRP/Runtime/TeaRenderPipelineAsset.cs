@@ -9,8 +9,11 @@ public class TeaRenderPipelineAsset : RenderPipelineAsset
     [SerializeField]
     bool useDynamicBatching = true, useGPUInstancing = true, useSRPBatcher = true;
 
+    [SerializeField]
+    TeaShadowSettings shadows = default;
+
     protected override RenderPipeline CreatePipeline()
     {
-        return new TeaRenderPipeline(useDynamicBatching, useGPUInstancing, useSRPBatcher);
+        return new TeaRenderPipeline(useDynamicBatching, useGPUInstancing, useSRPBatcher, shadows);
     }
 }
