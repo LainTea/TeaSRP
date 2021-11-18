@@ -36,6 +36,8 @@ public class TeaShaderGUI : ShaderGUI
         materials = materialEditor.targets;
         this.properties = properties;
 
+        BakeEmission();
+
         EditorGUILayout.Space();
         showPresets = EditorGUILayout.Foldout(showPresets, "Presets", true);
         if(showPresets)
@@ -49,6 +51,37 @@ public class TeaShaderGUI : ShaderGUI
         if(EditorGUI.EndChangeCheck())
         {
             SetShadowCasterPass();
+            CopyLightMappingProperties();
+        }
+    }
+
+    void BakeEmission()
+    {
+        EditorGUI.BeginChangeCheck();
+        editor.LightmapEmissionProperty();
+        if (EditorGUI.EndChangeCheck())
+        {
+            foreach(Material m in editor.targets)
+            {
+                m.globalIlluminationFlags &= ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+            }
+        }
+    }
+
+    void CopyLightMappingProperties()
+    {
+        MaterialProperty maintex = FindProperty("_MainTex", properties, false);
+        MaterialProperty basemap = FindProperty("_BaseMap", properties, false);
+        if(maintex != null && basemap != null)
+        {
+            maintex.textureValue = basemap.textureValue;
+            maintex.textureScaleAndOffset = basemap.textureScaleAndOffset;
+        }
+        MaterialProperty color = FindProperty("_Color", properties, false);
+        MaterialProperty baseColor = FindProperty("_BaseColor", properties, false);
+        if(color != null && baseColor != null)
+        {
+            color.colorValue = baseColor.colorValue;
         }
     }
 
