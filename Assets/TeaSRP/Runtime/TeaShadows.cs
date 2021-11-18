@@ -33,6 +33,9 @@ public class TeaShadows
     static int cascadeDataId = Shader.PropertyToID("_CascadeData");
     static int shadowAtlasSizeId = Shader.PropertyToID("_ShadowAtlasSize");
     static int shadowDistanceFadeId = Shader.PropertyToID("_ShadowDistanceFade");
+    static string[] shadowMaskKeywords = { "_SHADOW_MASK_ALWAYS", "_SHADOW_MASK_DISTANCE" };
+
+    bool useShadowMask;
 
     static Vector4[] cascadeCullingSpheres = new Vector4[maxCascades];
     static Vector4[] cascadeData = new Vector4[maxCascades];
@@ -50,22 +53,35 @@ public class TeaShadows
         "_CASCADE_BLEND_DITHER"
     };
 
-    public Vector3 ReserveDirectionalShadows(Light light,int visibleLightIndex)
+    public Vector4 ReserveDirectionalShadows(Light light,int visibleLightIndex)
     {
         if(ShadowedDirectionalLightCount < maxShadowedDirectionalLightCount &&
-            light.shadows != LightShadows.None && light.shadowStrength > 0f &&
-            cullingResults.GetShadowCasterBounds(visibleLightIndex,out Bounds b))
+            light.shadows != LightShadows.None && light.shadowStrength > 0f)
         {
+            float maskChannel = -1;
+            LightBakingOutput lightBaking = light.bakingOutput;
+            if(lightBaking.lightmapBakeType == LightmapBakeType.Mixed && lightBaking.mixedLightingMode == MixedLightingMode.Shadowmask)
+            {
+                useShadowMask = true;
+                maskChannel = lightBaking.occlusionMaskChannel;
+            }
+
+            if(!cullingResults.GetShadowCasterBounds(visibleLightIndex, out Bounds b))
+            {
+                return new Vector4(-light.shadowStrength, 0f, 0f, maskChannel);
+            }
+
             ShadowedDirectionalLights[ShadowedDirectionalLightCount] = new ShadowedDirectionalLight
             {
                 visibleLightIndex = visibleLightIndex,
                 slopeScaleBias = light.shadowBias,
                 nearPlaneOffset = light.shadowNearPlane
             };
-            return new Vector3(light.shadowStrength, settings.directional.cascadeCount * ShadowedDirectionalLightCount++, light.shadowNormalBias);
+            return new Vector4(light.shadowStrength, settings.directional.cascadeCount * ShadowedDirectionalLightCount++, 
+                                    light.shadowNormalBias, maskChannel);
         }
 
-        return Vector3.zero;
+        return new Vector4(0f, 0f, 0f, -1f);
     }
 
     public void Render()
@@ -78,6 +94,11 @@ public class TeaShadows
         {
             buffer.GetTemporaryRT(dirShadowAtlasId, 1, 1, 32, FilterMode.Bilinear, RenderTextureFormat.Shadowmap);
         }
+
+        buffer.BeginSample(bufferName);
+        SetKeywords(shadowMaskKeywords, useShadowMask ? QualitySettings.shadowmaskMode == ShadowmaskMode.Shadowmask ? 0 : 1 : -1);
+        buffer.EndSample(bufferName);
+        ExecuteBuffer();
     }
 
     void RenderDirectionalShadows()
@@ -87,7 +108,7 @@ public class TeaShadows
         buffer.SetRenderTarget(dirShadowAtlasId, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
         buffer.ClearRenderTarget(true, false, Color.clear);
         buffer.BeginSample(bufferName);
-        ExcuteBuffer();
+        ExecuteBuffer();
 
         int tiles = ShadowedDirectionalLightCount * settings.directional.cascadeCount;
         int split = tiles <= 1 ? 1 : tiles <= 4 ? 2 : 4;
@@ -108,7 +129,7 @@ public class TeaShadows
         SetKeywords(cascadeBlendKeywords, (int)settings.directional.cascadeBlend - 1);
         buffer.SetGlobalVector(shadowAtlasSizeId, new Vector4(atlasSize, 1f / atlasSize));
         buffer.EndSample(bufferName);
-        ExcuteBuffer();
+        ExecuteBuffer();
     }
 
     void SetKeywords(string[] keywords,int enableIndex)
@@ -172,7 +193,7 @@ public class TeaShadows
         for(int i = 0;i < cascadeCount; i++)
         {
             cullingResults.ComputeDirectionalShadowMatricesAndCullingPrimitives(
-                                light.visibleLightIndex, i, cascadeCount, ratios, tileSize, light.nearPlaneOffset,
+                                    light.visibleLightIndex, i, cascadeCount, ratios, tileSize, light.nearPlaneOffset,
                                     out Matrix4x4 viewMatrix, out Matrix4x4 projectionMatrix, out ShadowSplitData splitData);
             splitData.shadowCascadeBlendCullingFactor = cullingFactor;
             shadowSettings.splitData = splitData;
@@ -185,7 +206,7 @@ public class TeaShadows
                                             SetTileViewport(tileIndex, split, tileSize), split);
             buffer.SetViewProjectionMatrices(viewMatrix, projectionMatrix);
             buffer.SetGlobalDepthBias(0f, light.slopeScaleBias);
-            ExcuteBuffer();
+            ExecuteBuffer();
             context.DrawShadows(ref shadowSettings);
             buffer.SetGlobalDepthBias(0f, 0f);
         }
@@ -207,9 +228,10 @@ public class TeaShadows
         this.cullingResults = cullingResults;
         this.settings = settings;
         ShadowedDirectionalLightCount = 0;
+        useShadowMask = false;
     }
 
-    void ExcuteBuffer()
+    void ExecuteBuffer()
     {
         context.ExecuteCommandBuffer(buffer);
         buffer.Clear();
@@ -218,6 +240,6 @@ public class TeaShadows
     public void Cleanup()
     {
         buffer.ReleaseTemporaryRT(dirShadowAtlasId);
-        ExcuteBuffer();
+        ExecuteBuffer();
     }
 }
